@@ -1,22 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-
-export interface PageText {
-  pageNumber: number;
-  text: string;
-}
-
-export interface TextChunk {
-  text: string;
-  pageNumber: number;
-  chunkIndex: number;
-  tokenCount: number;
-}
-
-export interface ChunkingOptions {
-  chunkSize: number;
-  chunkOverlap: number;
-}
+import { PageText, TextChunk, ChunkingOptions } from './interfaces/text-chunk.interface';
 
 /**
  * ChunkingService — splits page text into overlapping, LLM-sized pieces.

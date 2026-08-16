@@ -1,7 +1,7 @@
-import type { DocumentStatus } from '../interfaces/document-metadata.interface';
+export type DocumentStatus = 'processing' | 'processed' | 'failed';
 
-export class DocumentResponseDto {
-  documentId: string;
+export interface DocumentMetadata {
+  id: string;
   filename: string;
   fileSize: number;
   pageCount: number;

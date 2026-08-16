@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { DocumentMetadata, DocumentsRepository } from './documents.repository';
+import { DocumentsRepository } from './documents.repository';
+import { DocumentMetadata } from './interfaces/document-metadata.interface';
 
 /**
  * Default DocumentsRepository implementation for the MVP: an in-process Map.

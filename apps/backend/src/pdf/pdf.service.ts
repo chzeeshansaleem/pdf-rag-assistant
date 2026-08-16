@@ -5,19 +5,15 @@ import { PdfProcessor } from './pdf.processor';
 import { ChunkingService } from './chunking.service';
 import { cleanText } from './text-cleaner.util';
 import { sanitizeFilename } from './filename.util';
-import { DocumentMetadata, DocumentsRepository } from './documents.repository';
+import { DocumentsRepository } from './documents.repository';
+import { DocumentMetadata } from './interfaces/document-metadata.interface';
+import { UploadedFile } from './interfaces/uploaded-file.interface';
 import { DocumentResponseDto } from './dto/document-response.dto';
 import { UploadDocumentResponseDto } from './dto/upload-document-response.dto';
 import { EmbeddingsService } from '../embeddings/embeddings.service';
-import { QdrantService, VectorChunk } from '../vector-store/qdrant.service';
+import { QdrantService } from '../vector-store/qdrant.service';
+import { VectorChunk } from '../vector-store/interfaces/vector-chunk.interface';
 import { DocumentNotFoundException, EmptyDocumentException, FileTooLargeException, InvalidFileException } from '../common/exceptions/app.exceptions';
-
-export interface UploadedFile {
-  originalname: string;
-  mimetype: string;
-  size: number;
-  buffer: Buffer;
-}
 
 /**
  * PdfService — orchestrates the full document ingestion pipeline described
@@ -72,6 +68,7 @@ export class PdfService {
         pageNumber: page.pageNumber,
         text: cleanText(page.text),
       }));
+
       const hasText = cleanedPages.some((p) => p.text.length > 0);
       if (!hasText) {
         throw new EmptyDocumentException();

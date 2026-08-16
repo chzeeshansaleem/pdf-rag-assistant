@@ -1,7 +1,7 @@
 import { RagService } from './rag.service';
 import { PromptService, NOT_FOUND_ANSWER } from './prompt.service';
 import { LlmServiceException } from '../common/exceptions/app.exceptions';
-import type { RetrievedChunk } from './retriever.service';
+import type { RetrievedChunk } from './interfaces/retrieved-chunk.interface';
 
 function makeConfigStub(overrides: Record<string, unknown> = {}) {
   const values: Record<string, unknown> = { 'openai.chatModel': 'gpt-4o-mini', ...overrides };

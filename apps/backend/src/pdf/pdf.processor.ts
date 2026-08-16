@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { PDFParse as PDFParseType } from 'pdf-parse';
 import { PdfParsingException } from '../common/exceptions/app.exceptions';
+import { ExtractedPage, ExtractedPdf } from './interfaces/extracted-pdf.interface';
 
 /**
  * pdf-parse (via pdfjs-dist) tries to polyfill DOMMatrix/ImageData/Path2D
@@ -22,19 +23,6 @@ for (const name of ['DOMMatrix', 'ImageData', 'Path2D']) {
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { PDFParse } = require('pdf-parse') as typeof import('pdf-parse');
-
-/**
- * Raw text extracted from a single PDF page, before cleaning/chunking.
- */
-export interface ExtractedPage {
-  pageNumber: number;
-  text: string;
-}
-
-export interface ExtractedPdf {
-  pageCount: number;
-  pages: ExtractedPage[];
-}
 
 /**
  * PdfProcessor — the only component in the app that knows how to read raw

@@ -5,18 +5,7 @@ import { RetrieverService } from './retriever.service';
 import { PromptService, NOT_FOUND_ANSWER } from './prompt.service';
 import { LlmServiceException } from '../common/exceptions/app.exceptions';
 import { OPENAI_CLIENT } from '../common/openai-client.provider';
-
-export interface AnswerSource {
-  documentId: string;
-  filename: string;
-  pageNumber: number;
-  chunkIndex: number;
-}
-
-export interface AnswerResult {
-  answer: string;
-  sources: AnswerSource[];
-}
+import { AnswerSource, AnswerResult } from './interfaces/answer-result.interface';
 
 const MAX_RETRIES = 2;
 const BASE_RETRY_DELAY_MS = 500;

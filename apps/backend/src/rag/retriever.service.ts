@@ -2,14 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EmbeddingsService } from '../embeddings/embeddings.service';
 import { QdrantService } from '../vector-store/qdrant.service';
-
-export interface RetrievedChunk {
-  text: string;
-  filename: string;
-  pageNumber: number;
-  chunkIndex: number;
-  score: number;
-}
+import { RetrievedChunk } from './interfaces/retrieved-chunk.interface';
 
 /**
  * RetrieverService — turns a user's question into a ranked list of relevant

@@ -1,5 +1,5 @@
 import { PromptService, NOT_FOUND_ANSWER } from './prompt.service';
-import type { RetrievedChunk } from './retriever.service';
+import type { RetrievedChunk } from './interfaces/retrieved-chunk.interface';
 
 describe('PromptService', () => {
   const service = new PromptService();

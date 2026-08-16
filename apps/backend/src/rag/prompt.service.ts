@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type OpenAI from 'openai';
-import { RetrievedChunk } from './retriever.service';
+import { RetrievedChunk } from './interfaces/retrieved-chunk.interface';
 
 export const NOT_FOUND_ANSWER = "I couldn't find this information in the uploaded document.";
 
