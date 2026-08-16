@@ -1,0 +1,49 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 7 0 R >> >> /MediaBox [0 0 612 792] /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 339 >>
+stream
+BT /F1 12 Tf 50 750 Td (AWS Architecture Overview) Tj ET
+BT /F1 12 Tf 50 730 Td (This document describes the AWS architecture used by the platform.) Tj ET
+BT /F1 12 Tf 50 710 Td (The system uses PostgreSQL as the primary relational database.) Tj ET
+BT /F1 12 Tf 50 690 Td (All application servers run on EC2 instances behind an ALB.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 7 0 R >> >> /MediaBox [0 0 612 792] /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 309 >>
+stream
+BT /F1 12 Tf 50 750 Td (Storage and Caching) Tj ET
+BT /F1 12 Tf 50 730 Td (Static assets are stored in S3 and served via CloudFront.) Tj ET
+BT /F1 12 Tf 50 710 Td (Redis is used for caching frequently accessed session data.) Tj ET
+BT /F1 12 Tf 50 690 Td (Background jobs are processed using SQS queues.) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000000637 00000 n 
+0000000763 00000 n 
+0000001123 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+1193
+%%EOF

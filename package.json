@@ -1,0 +1,20 @@
+{
+  "name": "pdf-rag-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PDF Question Answering RAG Agent — React + NestJS + OpenAI + Qdrant",
+  "workspaces": [
+    "apps/backend",
+    "apps/frontend"
+  ],
+  "scripts": {
+    "dev:backend": "npm run start:dev --workspace=apps/backend",
+    "dev:frontend": "npm run dev --workspace=apps/frontend",
+    "build:backend": "npm run build --workspace=apps/backend",
+    "build:frontend": "npm run build --workspace=apps/frontend",
+    "test:backend": "npm run test --workspace=apps/backend",
+    "test:backend:e2e": "npm run test:e2e --workspace=apps/backend",
+    "infra:up": "docker compose up -d qdrant postgres",
+    "infra:down": "docker compose down"
+  }
+}

@@ -1,0 +1,39 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# env
+.env
+.env.local
+**/.env
+
+# build output
+dist/
+build/
+**/dist/
+**/build/
+*.tsbuildinfo
+
+# logs
+*.log
+npm-debug.log*
+
+# test coverage
+coverage/
+**/coverage/
+
+# uploads (temporary local storage before processing)
+uploads/
+**/uploads/
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# docker volumes (bind-mounted local data)
+docker/qdrant_storage/
+docker/postgres_data/
