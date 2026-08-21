@@ -121,6 +121,37 @@ function fakeSummarize(userContent: string): string {
   return `Summary: ${newMessages.replace(/\s+/g, ' ').slice(0, 200)}`;
 }
 
+// --- Fake retrieval-sufficiency evaluator ---------------------------------
+// The real ContextEvaluatorService asks an LLM to judge whether retrieved
+// chunks actually cover the question, and to propose a refined search query
+// when they don't. A real semantic judgment can't be reproduced
+// deterministically here, so this stand-in instead honors two explicit
+// marker tokens the e2e tests embed directly in the search query — it
+// implements the same CONTRACT (return {sufficient, reason, refinedQuery})
+// the real evaluator honors, just driven by markers instead of semantics.
+// The markers are chosen from words that never appear in any fixture PDF,
+// so they barely perturb the fake embedding's retrieval score (see
+// fakeEmbed's stopword filtering) and never accidentally match real content.
+function fakeEvaluate(userContent: string): { sufficient: boolean; reason: string; refinedQuery?: string } {
+  const question = userContent.match(/Question: ([\s\S]*?)\n\nRetrieved context:/)?.[1]?.trim() ?? '';
+
+  if (question.includes('needsonerefinement')) {
+    return {
+      sufficient: false,
+      reason: 'test marker requests exactly one refinement',
+      refinedQuery: question.replace('needsonerefinement', 'refinementapplied'),
+    };
+  }
+  if (question.includes('neversufficient')) {
+    return {
+      sufficient: false,
+      reason: 'test marker never resolves',
+      refinedQuery: `${question} retry${Math.random().toString(36).slice(2, 8)}`,
+    };
+  }
+  return { sufficient: true, reason: 'no refinement marker present' };
+}
+
 const fakeOpenAiClient = {
   embeddings: {
     create: async ({ input }: { input: string[] }) => ({
@@ -141,6 +172,11 @@ const fakeOpenAiClient = {
         // Conversation summarization call (ConversationsService.summarize)
         if (systemMessage.includes('running summary of an ongoing conversation')) {
           return { choices: [{ message: { content: fakeSummarize(userMessage) } }] };
+        }
+
+        // Retrieval-sufficiency evaluation call (ContextEvaluatorService)
+        if (systemMessage.includes('retrieval quality evaluator')) {
+          return { choices: [{ message: { content: JSON.stringify(fakeEvaluate(userMessage)) } }] };
         }
 
         // Final answer call — mirrors what a real grounded LLM does: answer
@@ -692,6 +728,62 @@ describe('RAG pipeline (integration)', () => {
       // not be echoed back as if it were authoritative.
       expect(res.body.answer).toContain('20');
       expect(res.body.answer).not.toContain('40');
+    });
+  });
+
+  describe('Self-correcting RAG (retrieval evaluation and retry)', () => {
+    let hrDoc: { documentId: string };
+
+    beforeAll(async () => {
+      const hr = await uploadFixture('hr-policy.pdf');
+      await waitForStatus(hr.body.documentId, 'processed');
+      hrDoc = hr.body;
+    });
+
+    it('retries once with the evaluator-refined query after an insufficient first attempt, then answers grounded in the retried chunk', async () => {
+      const question = 'How many days of paid vacation are employees entitled to? needsonerefinement';
+      const res = await askQuestion(hrDoc.documentId, question);
+
+      expect(res.status).toBe(201);
+      expect(res.body.answer.toLowerCase()).toContain('20 days');
+      expect(res.body.sources.length).toBeGreaterThan(0);
+      expect(res.body.sources[0].documentId).toBe(hrDoc.documentId);
+    });
+
+    it('falls through to the answer LLM once retries stop finding new chunks, even when the evaluator marker says it should never be sufficient', async () => {
+      // hr-policy.pdf has exactly one chunk, so refining the query can never
+      // turn up anything new — every retry retrieves the identical chunk.
+      // Rather than exhausting all retries and giving up, the loop should
+      // detect that convergence and let the answer LLM take a shot with
+      // what's there instead of returning NOT_FOUND for content that was
+      // actually available. This is the exact bug this fix addresses: a
+      // stricter evaluator was blocking answers the LLM could have given.
+      const question = 'How many days of paid vacation are employees entitled to? neversufficient';
+      const res = await askQuestion(hrDoc.documentId, question);
+
+      expect(res.status).toBe(201);
+      expect(res.body.answer).not.toBe("I couldn't find this information in the uploaded document.");
+      expect(res.body.answer.toLowerCase()).toContain('20 days');
+      expect(res.body.sources.length).toBeGreaterThan(0);
+      expect(res.body.sources[0].documentId).toBe(hrDoc.documentId);
+    });
+
+    it('conversation memory and query rewriting keep working alongside self-correction', async () => {
+      const conversation = await request(app.getHttpServer()).post('/api/conversations');
+      const conversationId = conversation.body.id;
+
+      const turn1 = await request(app.getHttpServer())
+        .post('/api/chat')
+        .send({ conversationId, documentIds: [hrDoc.documentId], question: 'How many days of paid vacation are employees entitled to?' });
+      expect(turn1.status).toBe(201);
+      expect(turn1.body.answer.toLowerCase()).toContain('20 days');
+
+      const turn2 = await request(app.getHttpServer())
+        .post('/api/chat')
+        .send({ conversationId, documentIds: [hrDoc.documentId], question: 'How do I request it?' });
+      expect(turn2.status).toBe(201);
+      expect(turn2.body.answer.toLowerCase()).toContain('portal');
+      expect(turn2.body.sources.length).toBeGreaterThan(0);
     });
   });
 

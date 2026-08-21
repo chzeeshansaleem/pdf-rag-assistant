@@ -1,32 +1,36 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
-import { RetrieverService } from './retriever.service';
 import { PromptService, NOT_FOUND_ANSWER } from './prompt.service';
 import { QueryRewriterService } from './query-rewriter.service';
 import { ChitchatService } from './chitchat.service';
+import { SelfCorrectingRetrievalService } from './self-correcting-retrieval.service';
 import { LlmServiceException } from '../common/exceptions/app.exceptions';
 import { OPENAI_CLIENT } from '../common/openai-client.provider';
 import { AnswerSource, AnswerResult } from './interfaces/answer-result.interface';
 import { RetrievalScope } from '../vector-store/interfaces/retrieval-scope.interface';
 import type { ConversationMemory } from '../conversations/interfaces/conversation-memory.interface';
 
+// Retries for a transient OpenAI API failure (429/5xx) on the FINAL answer
+// call — unrelated to RAG_MAX_RETRIES (rag.maxRetries), which bounds
+// SelfCorrectingRetrievalService's retrieve-evaluate-refine loop instead.
 const MAX_RETRIES = 2;
 const BASE_RETRY_DELAY_MS = 500;
 
 /**
  * RagService — orchestrates the full retrieval-augmented generation flow:
  *
- *   question -> chitchat check -> retrieve chunks -> relevance check -> build prompt -> LLM -> grounded answer
+ *   question -> chitchat check -> self-correcting retrieval (retrieve -> evaluate -> refine -> retry) -> build prompt -> LLM -> grounded answer
  *
  * Why it exists: this is the component described in spec section 9 ("RAG
- * Query Flow"). It deliberately contains no retrieval or prompt-construction
- * logic of its own (those belong to RetrieverService and PromptService) —
- * its only responsibility is sequencing them and applying two
- * short-circuits: ChitchatService first (a greeting/social message never
- * touches retrieval or the LLM at all), then the hallucination-protection
- * short-circuit — if retrieval finds nothing sufficiently relevant, the LLM
- * is never even called.
+ * Query Flow"). It deliberately contains no retrieval, evaluation, or
+ * prompt-construction logic of its own (those belong to
+ * SelfCorrectingRetrievalService and PromptService) — its only
+ * responsibility is sequencing them and applying two short-circuits:
+ * ChitchatService first (a greeting/social message never touches retrieval
+ * or the LLM at all), then the hallucination-protection short-circuit — if
+ * the self-correcting retrieval loop never finds sufficient context (even
+ * after retries), the answer-generation LLM is never even called.
  *
  * What enters: a retrieval scope (specific documents and/or a category, or
  * neither to search the whole library), the user's natural-language
@@ -55,7 +59,7 @@ export class RagService {
   private readonly model: string;
 
   constructor(
-    private readonly retrieverService: RetrieverService,
+    private readonly selfCorrectingRetrievalService: SelfCorrectingRetrievalService,
     private readonly promptService: PromptService,
     private readonly queryRewriterService: QueryRewriterService,
     private readonly chitchatService: ChitchatService,
@@ -75,10 +79,13 @@ export class RagService {
     this.logger.log(`RAG query received for scope ${JSON.stringify(scope)}`);
 
     const searchQuery = memory ? await this.queryRewriterService.rewrite(question, memory) : question;
-    const chunks = await this.retrieverService.retrieve(scope, searchQuery);
+    const retrieval = await this.selfCorrectingRetrievalService.retrieveWithSelfCorrection(scope, searchQuery);
+    const chunks = retrieval.chunks;
 
-    if (chunks.length === 0) {
-      this.logger.log(`No sufficiently relevant chunks found for scope ${JSON.stringify(scope)} — skipping LLM call`);
+    if (chunks.length === 0 || !retrieval.sufficient) {
+      this.logger.log(
+        `Context deemed insufficient after ${retrieval.attempts} attempt(s) for scope ${JSON.stringify(scope)} — skipping LLM call (reason: ${retrieval.reason})`,
+      );
       return { answer: NOT_FOUND_ANSWER, sources: [] };
     }
 

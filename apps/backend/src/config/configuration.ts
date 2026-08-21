@@ -28,6 +28,8 @@ export interface AppConfig {
     topK: number;
     similarityThreshold: number;
     maxRecentMessages: number;
+    /** Additional retry attempts the self-correcting retrieval loop may take beyond the first, when the LLM evaluator judges retrieved context insufficient. */
+    maxRetries: number;
   };
   upload: {
     maxFileSize: number;
@@ -74,6 +76,7 @@ export default (): AppConfig => ({
     // and the final answer). Older messages are folded into a rolling
     // conversation summary instead of being sent raw forever.
     maxRecentMessages: toInt(process.env.RAG_MAX_RECENT_MESSAGES, 10),
+    maxRetries: toInt(process.env.RAG_MAX_RETRIES, 2),
   },
   upload: {
     maxFileSize: toInt(process.env.MAX_FILE_SIZE, 20 * 1024 * 1024),
