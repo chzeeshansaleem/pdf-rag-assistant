@@ -1,4 +1,5 @@
 export interface RetrievedChunk {
+  documentId: string;
   text: string;
   filename: string;
   pageNumber: number;

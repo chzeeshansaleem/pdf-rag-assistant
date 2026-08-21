@@ -34,7 +34,7 @@ describe('QdrantService', () => {
   });
 
   describe('createCollection', () => {
-    it('creates the collection and a documentId payload index when it does not exist', async () => {
+    it('creates the collection and documentId/category payload indexes when it does not exist', async () => {
       mockClientInstance.getCollections.mockResolvedValue({ collections: [] });
       const service = new QdrantService(makeConfigStub());
 
@@ -48,15 +48,27 @@ describe('QdrantService', () => {
         'pdf_documents',
         expect.objectContaining({ field_name: 'documentId' }),
       );
+      expect(mockClientInstance.createPayloadIndex).toHaveBeenCalledWith(
+        'pdf_documents',
+        expect.objectContaining({ field_name: 'category' }),
+      );
     });
 
-    it('does nothing if the collection already exists', async () => {
+    it('does not recreate the collection if it already exists, but still ensures payload indexes', async () => {
       mockClientInstance.getCollections.mockResolvedValue({ collections: [{ name: 'pdf_documents' }] });
       const service = new QdrantService(makeConfigStub());
 
       await service.createCollection();
 
       expect(mockClientInstance.createCollection).not.toHaveBeenCalled();
+      expect(mockClientInstance.createPayloadIndex).toHaveBeenCalledWith(
+        'pdf_documents',
+        expect.objectContaining({ field_name: 'documentId' }),
+      );
+      expect(mockClientInstance.createPayloadIndex).toHaveBeenCalledWith(
+        'pdf_documents',
+        expect.objectContaining({ field_name: 'category' }),
+      );
     });
   });
 
@@ -109,19 +121,64 @@ describe('QdrantService', () => {
   });
 
   describe('searchSimilarChunks', () => {
-    it('scopes the search to the given documentId via a filter', async () => {
+    it('scopes the search to given documentIds via a filter', async () => {
       mockClientInstance.query.mockResolvedValue({ points: [] });
       const service = new QdrantService(makeConfigStub());
 
-      await service.searchSimilarChunks([0.1, 0.2], 'doc-123', 5, 0.35);
+      await service.searchSimilarChunks([0.1, 0.2], { documentIds: ['doc-123'] }, 5, 0.35);
 
       expect(mockClientInstance.query).toHaveBeenCalledWith(
         'pdf_documents',
         expect.objectContaining({
-          filter: { must: [{ key: 'documentId', match: { value: 'doc-123' } }] },
+          filter: { must: [{ key: 'documentId', match: { any: ['doc-123'] } }] },
           limit: 5,
           score_threshold: 0.35,
         }),
+      );
+    });
+
+    it('scopes the search to a category via a filter', async () => {
+      mockClientInstance.query.mockResolvedValue({ points: [] });
+      const service = new QdrantService(makeConfigStub());
+
+      await service.searchSimilarChunks([0.1], { category: 'HR' }, 5);
+
+      expect(mockClientInstance.query).toHaveBeenCalledWith(
+        'pdf_documents',
+        expect.objectContaining({
+          filter: { must: [{ key: 'category', match: { value: 'HR' } }] },
+        }),
+      );
+    });
+
+    it('combines documentIds and category filters with AND semantics', async () => {
+      mockClientInstance.query.mockResolvedValue({ points: [] });
+      const service = new QdrantService(makeConfigStub());
+
+      await service.searchSimilarChunks([0.1], { documentIds: ['a', 'b'], category: 'Finance' }, 5);
+
+      expect(mockClientInstance.query).toHaveBeenCalledWith(
+        'pdf_documents',
+        expect.objectContaining({
+          filter: {
+            must: [
+              { key: 'documentId', match: { any: ['a', 'b'] } },
+              { key: 'category', match: { value: 'Finance' } },
+            ],
+          },
+        }),
+      );
+    });
+
+    it('omits the filter entirely (searches all documents) when scope is empty', async () => {
+      mockClientInstance.query.mockResolvedValue({ points: [] });
+      const service = new QdrantService(makeConfigStub());
+
+      await service.searchSimilarChunks([0.1], {}, 5);
+
+      expect(mockClientInstance.query).toHaveBeenCalledWith(
+        'pdf_documents',
+        expect.objectContaining({ filter: undefined }),
       );
     });
 
@@ -131,7 +188,7 @@ describe('QdrantService', () => {
       });
       const service = new QdrantService(makeConfigStub());
 
-      const results = await service.searchSimilarChunks([0.1], 'd', 5);
+      const results = await service.searchSimilarChunks([0.1], { documentIds: ['d'] }, 5);
       expect(results).toEqual([
         { score: 0.9, payload: { documentId: 'd', filename: 'f.pdf', pageNumber: 2, chunkIndex: 3, text: 'x', createdAt: '' } },
       ]);
@@ -140,7 +197,7 @@ describe('QdrantService', () => {
     it('wraps search failures in VectorStoreException', async () => {
       mockClientInstance.query.mockRejectedValue(new Error('timeout'));
       const service = new QdrantService(makeConfigStub());
-      await expect(service.searchSimilarChunks([0.1], 'd', 5)).rejects.toBeInstanceOf(VectorStoreException);
+      await expect(service.searchSimilarChunks([0.1], { documentIds: ['d'] }, 5)).rejects.toBeInstanceOf(VectorStoreException);
     });
   });
 

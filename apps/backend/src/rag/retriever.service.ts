@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EmbeddingsService } from '../embeddings/embeddings.service';
 import { QdrantService } from '../vector-store/qdrant.service';
+import { RetrievalScope } from '../vector-store/interfaces/retrieval-scope.interface';
 import { RetrievedChunk } from './interfaces/retrieved-chunk.interface';
 
 /**
@@ -20,7 +21,8 @@ import { RetrievedChunk } from './interfaces/retrieved-chunk.interface';
  * "here are weakly-related chunks", so an off-topic question can correctly
  * short-circuit to "not found" instead of feeding noise to the LLM.
  *
- * What enters: a documentId (scopes the search to one PDF) and a question.
+ * What enters: a scope (specific document IDs and/or a category, or neither
+ * to search the whole library) and a question.
  * What leaves: chunks above the similarity threshold, ranked by relevance.
  */
 @Injectable()
@@ -33,15 +35,15 @@ export class RetrieverService {
     private readonly configService: ConfigService,
   ) {}
 
-  async retrieve(documentId: string, question: string): Promise<RetrievedChunk[]> {
-    const topK = this.configService.get<number>('rag.topK', { infer: true }) ?? 5;
+  async retrieve(scope: RetrievalScope, question: string): Promise<RetrievedChunk[]> {
+    const topK = this.configService.get<number>('rag.topK', { infer: true }) ?? 8;
     const similarityThreshold = this.configService.get<number>('rag.similarityThreshold', { infer: true }) ?? 0.35;
 
     const questionVector = await this.embeddingsService.generateEmbedding(question);
-    const results = await this.qdrantService.searchSimilarChunks(questionVector, documentId, topK, similarityThreshold);
+    const results = await this.qdrantService.searchSimilarChunks(questionVector, scope, topK, similarityThreshold);
 
     this.logger.log(
-      `Retrieved ${results.length} chunk(s) for document '${documentId}' (threshold=${similarityThreshold})`,
+      `Retrieved ${results.length} chunk(s) for scope ${JSON.stringify(scope)} (threshold=${similarityThreshold})`,
     );
 
     // Defensive re-filter: guarantees the threshold is honored even if the
@@ -49,6 +51,7 @@ export class RetrieverService {
     return results
       .filter((r) => r.score >= similarityThreshold)
       .map((r) => ({
+        documentId: r.payload.documentId,
         text: r.payload.text,
         filename: r.payload.filename,
         pageNumber: r.payload.pageNumber,

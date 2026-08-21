@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DocumentsRepository } from './documents.repository';
-import { DocumentMetadata } from './interfaces/document-metadata.interface';
+import { DocumentListFilter, DocumentMetadata } from './interfaces/document-metadata.interface';
 
 /**
  * Default DocumentsRepository implementation for the MVP: an in-process Map.
@@ -31,7 +31,11 @@ export class InMemoryDocumentsRepository extends DocumentsRepository {
     this.store.delete(id);
   }
 
-  async list(): Promise<DocumentMetadata[]> {
-    return Array.from(this.store.values());
+  async list(filter?: DocumentListFilter): Promise<DocumentMetadata[]> {
+    let docs = Array.from(this.store.values());
+    if (filter?.status) docs = docs.filter((d) => d.status === filter.status);
+    if (filter?.category) docs = docs.filter((d) => d.category === filter.category);
+    if (filter?.ids) docs = docs.filter((d) => filter.ids!.includes(d.id));
+    return docs;
   }
 }

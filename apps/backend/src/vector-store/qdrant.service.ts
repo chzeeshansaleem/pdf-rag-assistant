@@ -4,6 +4,7 @@ import { QdrantClient } from '@qdrant/js-client-rest';
 import { randomUUID } from 'node:crypto';
 import { VectorStoreException } from '../common/exceptions/app.exceptions';
 import { ChunkPayload, VectorChunk, SearchResult } from './interfaces/vector-chunk.interface';
+import { RetrievalScope } from './interfaces/retrieval-scope.interface';
 
 const VECTOR_SIZE_BY_MODEL: Record<string, number> = {
   'text-embedding-3-small': 1536,
@@ -61,21 +62,35 @@ export class QdrantService implements OnModuleInit {
     const exists = collections.collections.some((c) => c.name === this.collectionName);
     if (exists) {
       this.logger.log(`Qdrant collection '${this.collectionName}' already exists`);
+      await this.ensurePayloadIndexes();
       return;
     }
 
     await this.client.createCollection(this.collectionName, {
       vectors: { size: this.vectorSize, distance: 'Cosine' },
     });
+    this.logger.log(`Created Qdrant collection '${this.collectionName}' (size=${this.vectorSize})`);
 
-    // Index documentId so retrieval can filter by it efficiently — this is
-    // what keeps one document's chunks from leaking into another's answers.
+    await this.ensurePayloadIndexes();
+  }
+
+  /**
+   * Ensures the documentId and category payload indexes exist, regardless
+   * of whether the collection was just created or already existed. Qdrant
+   * no-ops when an index of the same name/schema already exists, so this is
+   * safe to call unconditionally on every boot — self-healing for a
+   * collection that predates the category index, with no manual migration
+   * step required.
+   */
+  private async ensurePayloadIndexes(): Promise<void> {
     await this.client.createPayloadIndex(this.collectionName, {
       field_name: 'documentId',
       field_schema: 'keyword',
     });
-
-    this.logger.log(`Created Qdrant collection '${this.collectionName}' (size=${this.vectorSize})`);
+    await this.client.createPayloadIndex(this.collectionName, {
+      field_name: 'category',
+      field_schema: 'keyword',
+    });
   }
 
   async upsertChunks(chunks: VectorChunk[]): Promise<void> {
@@ -97,23 +112,30 @@ export class QdrantService implements OnModuleInit {
   }
 
   /**
-   * Similarity search scoped to a single document. Filtering by documentId
+   * Similarity search scoped to a subset of documents (by documentId list
+   * and/or category), or the whole library when scope is empty. Filtering
    * at the database level (rather than fetching broadly and filtering in
    * app code) is both faster and is the actual guarantee that a question
-   * about Document A can never retrieve chunks from Document B.
+   * scoped to one document/category can never retrieve chunks outside it.
    */
   async searchSimilarChunks(
     queryVector: number[],
-    documentId: string,
+    scope: RetrievalScope,
     topK: number,
     scoreThreshold?: number,
   ): Promise<SearchResult[]> {
     try {
+      const must: Array<Record<string, unknown>> = [];
+      if (scope.documentIds?.length) {
+        must.push({ key: 'documentId', match: { any: scope.documentIds } });
+      }
+      if (scope.category) {
+        must.push({ key: 'category', match: { value: scope.category } });
+      }
+
       const response = await this.client.query(this.collectionName, {
         query: queryVector,
-        filter: {
-          must: [{ key: 'documentId', match: { value: documentId } }],
-        },
+        filter: must.length ? { must } : undefined,
         limit: topK,
         score_threshold: scoreThreshold,
         with_payload: true,

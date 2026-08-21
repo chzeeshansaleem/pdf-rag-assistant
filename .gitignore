@@ -7,6 +7,9 @@ node_modules/
 .env.local
 **/.env
 
+# MCP server config (contains API keys)
+.mcp.json
+
 # build output
 dist/
 build/

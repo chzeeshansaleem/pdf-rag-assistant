@@ -6,14 +6,22 @@ import { ChunkingService } from './chunking.service';
 import { cleanText } from './text-cleaner.util';
 import { sanitizeFilename } from './filename.util';
 import { DocumentsRepository } from './documents.repository';
-import { DocumentMetadata } from './interfaces/document-metadata.interface';
+import { DocumentListFilter, DocumentMetadata } from './interfaces/document-metadata.interface';
 import { UploadedFile } from './interfaces/uploaded-file.interface';
 import { DocumentResponseDto } from './dto/document-response.dto';
 import { UploadDocumentResponseDto } from './dto/upload-document-response.dto';
+import { FileStorageService } from './file-storage.service';
+import { ConcurrencyLimiter } from './concurrency-limiter';
 import { EmbeddingsService } from '../embeddings/embeddings.service';
 import { QdrantService } from '../vector-store/qdrant.service';
 import { VectorChunk } from '../vector-store/interfaces/vector-chunk.interface';
-import { DocumentNotFoundException, EmptyDocumentException, FileTooLargeException, InvalidFileException } from '../common/exceptions/app.exceptions';
+import {
+  DocumentNotFoundException,
+  EmptyDocumentException,
+  FileTooLargeException,
+  InvalidDocumentStateException,
+  InvalidFileException,
+} from '../common/exceptions/app.exceptions';
 
 /**
  * PdfService — orchestrates the full document ingestion pipeline described
@@ -21,14 +29,21 @@ import { DocumentNotFoundException, EmptyDocumentException, FileTooLargeExceptio
  *
  *   upload -> extract text -> clean -> chunk -> embed -> store in Qdrant
  *
- * It intentionally contains no PDF-parsing, chunking, embedding, or
- * vector-store logic itself — those live in their own single-purpose
- * services. PdfService's only job is sequencing them and keeping document
- * metadata (status, page/chunk counts) in sync with what actually happened.
+ * Ingestion is split into two phases so uploads don't block the HTTP
+ * request: `createQueuedDocument` does the cheap, synchronous part
+ * (validate + persist the row + persist the original bytes) and returns
+ * immediately with status 'queued'; `processDocumentAsync` does the
+ * expensive part (extract/chunk/embed/upsert) and is invoked without being
+ * awaited by the controller, updating the document's status as it goes.
+ * That work runs through a small ConcurrencyLimiter so a large batch upload
+ * doesn't fire dozens of embedding/Qdrant calls at once — there's no job
+ * queue in this stack, so this in-process cap is what keeps a bulk upload
+ * from overwhelming the vector store or the embedding provider's rate limit.
  */
 @Injectable()
 export class PdfService {
   private readonly logger = new Logger(PdfService.name);
+  private readonly processingLimiter = new ConcurrencyLimiter(4);
 
   constructor(
     private readonly pdfProcessor: PdfProcessor,
@@ -36,16 +51,18 @@ export class PdfService {
     private readonly embeddingsService: EmbeddingsService,
     private readonly qdrantService: QdrantService,
     private readonly documentsRepository: DocumentsRepository,
+    private readonly fileStorageService: FileStorageService,
     private readonly configService: ConfigService,
   ) {}
 
-  async processUpload(file: UploadedFile | undefined): Promise<UploadDocumentResponseDto> {
+  async createQueuedDocument(file: UploadedFile | undefined, category?: string): Promise<UploadDocumentResponseDto> {
     this.validateFile(file);
     const validFile = file!;
 
     const documentId = randomUUID();
     const filename = sanitizeFilename(validFile.originalname);
     const now = new Date().toISOString();
+    const storagePath = await this.fileStorageService.save(documentId, validFile.buffer);
 
     const metadata: DocumentMetadata = {
       id: documentId,
@@ -53,16 +70,47 @@ export class PdfService {
       fileSize: validFile.size,
       pageCount: 0,
       chunkCount: 0,
-      status: 'processing',
+      status: 'queued',
+      category,
+      storagePath,
       createdAt: now,
       updatedAt: now,
     };
     await this.documentsRepository.create(metadata);
+    this.logger.log(`Queued document '${documentId}' (${filename})`);
+
+    return {
+      documentId,
+      filename,
+      status: 'queued',
+      category,
+      pageCount: 0,
+      chunkCount: 0,
+    };
+  }
+
+  async processDocumentAsync(documentId: string): Promise<void> {
+    // Admission to the limiter (not the call itself) gates when real work
+    // starts — a document can sit at 'queued' behind other in-flight work
+    // for a while on a big batch upload, which is expected and visible to
+    // the client via polling, rather than firing everything at once.
+    return this.processingLimiter.run(() => this.processDocument(documentId));
+  }
+
+  private async processDocument(documentId: string): Promise<void> {
+    const doc = await this.documentsRepository.findById(documentId);
+    if (!doc) {
+      this.logger.error(`Cannot process unknown document '${documentId}'`);
+      return;
+    }
+
+    await this.documentsRepository.update(documentId, { status: 'processing' });
 
     try {
-      this.logger.log(`Processing document '${documentId}' (${filename})`);
+      this.logger.log(`Processing document '${documentId}' (${doc.filename})`);
 
-      const extracted = await this.pdfProcessor.extract(validFile.buffer);
+      const buffer = await this.fileStorageService.read(documentId);
+      const extracted = await this.pdfProcessor.extract(buffer);
 
       const cleanedPages = extracted.pages.map((page) => ({
         pageNumber: page.pageNumber,
@@ -89,10 +137,11 @@ export class PdfService {
         vector: vectors[i],
         payload: {
           documentId,
-          filename,
+          filename: doc.filename,
           pageNumber: chunk.pageNumber,
           chunkIndex: chunk.chunkIndex,
           text: chunk.text,
+          category: doc.category,
           createdAt,
         },
       }));
@@ -102,24 +151,52 @@ export class PdfService {
         status: 'processed',
         pageCount: extracted.pageCount,
         chunkCount: chunks.length,
+        errorMessage: undefined,
       });
 
       this.logger.log(`Document '${documentId}' processed successfully`);
-
-      return {
-        documentId,
-        filename,
-        status: 'processed',
-        pageCount: extracted.pageCount,
-        chunkCount: chunks.length,
-      };
     } catch (error) {
       await this.documentsRepository.update(documentId, {
         status: 'failed',
         errorMessage: error instanceof Error ? error.message : 'Unknown error during processing',
       });
-      throw error;
+      this.logger.error(`Document '${documentId}' failed to process: ${error instanceof Error ? error.message : error}`);
     }
+  }
+
+  async retryDocument(documentId: string): Promise<DocumentResponseDto> {
+    const doc = await this.documentsRepository.findById(documentId);
+    if (!doc) throw new DocumentNotFoundException(documentId);
+    if (doc.status !== 'failed') {
+      throw new InvalidDocumentStateException(`Document '${documentId}' is not in a failed state (status: ${doc.status})`);
+    }
+    await this.documentsRepository.update(documentId, { status: 'queued', errorMessage: undefined });
+    void this.processDocumentAsync(documentId);
+    return this.toDto((await this.documentsRepository.findById(documentId))!);
+  }
+
+  async reprocessDocument(documentId: string): Promise<DocumentResponseDto> {
+    const doc = await this.documentsRepository.findById(documentId);
+    if (!doc) throw new DocumentNotFoundException(documentId);
+    if (doc.status !== 'processed' && doc.status !== 'failed') {
+      throw new InvalidDocumentStateException(
+        `Document '${documentId}' cannot be re-processed while status is '${doc.status}'`,
+      );
+    }
+    await this.qdrantService.deleteDocument(documentId);
+    await this.documentsRepository.update(documentId, {
+      status: 'queued',
+      errorMessage: undefined,
+      pageCount: 0,
+      chunkCount: 0,
+    });
+    void this.processDocumentAsync(documentId);
+    return this.toDto((await this.documentsRepository.findById(documentId))!);
+  }
+
+  async listDocuments(filter?: DocumentListFilter): Promise<DocumentResponseDto[]> {
+    const docs = await this.documentsRepository.list(filter);
+    return docs.map((doc) => this.toDto(doc));
   }
 
   async getDocument(documentId: string): Promise<DocumentResponseDto> {
@@ -134,12 +211,13 @@ export class PdfService {
 
     await this.qdrantService.deleteDocument(documentId);
     await this.documentsRepository.delete(documentId);
+    await this.fileStorageService.delete(documentId);
     this.logger.log(`Deleted document '${documentId}'`);
   }
 
   private validateFile(file: UploadedFile | undefined): void {
     if (!file) {
-      throw new InvalidFileException('No file was uploaded. Attach a PDF using the "file" field.');
+      throw new InvalidFileException('No file was uploaded. Attach one or more PDFs using the "files" field.');
     }
     if (file.mimetype !== 'application/pdf' || !file.originalname.toLowerCase().endsWith('.pdf')) {
       throw new InvalidFileException('Only PDF files are supported.');
@@ -161,6 +239,7 @@ export class PdfService {
       pageCount: doc.pageCount,
       chunkCount: doc.chunkCount,
       status: doc.status,
+      category: doc.category,
       errorMessage: doc.errorMessage,
       createdAt: doc.createdAt,
       updatedAt: doc.updatedAt,

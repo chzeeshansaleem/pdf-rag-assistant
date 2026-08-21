@@ -6,6 +6,7 @@ import { PromptService, NOT_FOUND_ANSWER } from './prompt.service';
 import { LlmServiceException } from '../common/exceptions/app.exceptions';
 import { OPENAI_CLIENT } from '../common/openai-client.provider';
 import { AnswerSource, AnswerResult } from './interfaces/answer-result.interface';
+import { RetrievalScope } from '../vector-store/interfaces/retrieval-scope.interface';
 
 const MAX_RETRIES = 2;
 const BASE_RETRY_DELAY_MS = 500;
@@ -22,9 +23,11 @@ const BASE_RETRY_DELAY_MS = 500;
  * hallucination-protection short-circuit: if retrieval finds nothing
  * sufficiently relevant, the LLM is never even called.
  *
- * What enters: a documentId and a natural-language question.
- * What leaves: an answer string grounded in the document, plus the exact
- * chunks (page numbers, chunk indices) it was derived from.
+ * What enters: a retrieval scope (specific documents and/or a category, or
+ * neither to search the whole library) and a natural-language question.
+ * What leaves: an answer string grounded in the retrieved documents, plus
+ * the exact chunks (which document, page number, chunk index) it was
+ * derived from.
  */
 @Injectable()
 export class RagService {
@@ -40,13 +43,13 @@ export class RagService {
     this.model = this.configService.get<string>('openai.chatModel', { infer: true }) ?? 'gpt-4o-mini';
   }
 
-  async answerQuestion(documentId: string, question: string): Promise<AnswerResult> {
-    this.logger.log(`RAG query received for document '${documentId}'`);
+  async answerQuestion(scope: RetrievalScope, question: string): Promise<AnswerResult> {
+    this.logger.log(`RAG query received for scope ${JSON.stringify(scope)}`);
 
-    const chunks = await this.retrieverService.retrieve(documentId, question);
+    const chunks = await this.retrieverService.retrieve(scope, question);
 
     if (chunks.length === 0) {
-      this.logger.log(`No sufficiently relevant chunks found for document '${documentId}' — skipping LLM call`);
+      this.logger.log(`No sufficiently relevant chunks found for scope ${JSON.stringify(scope)} — skipping LLM call`);
       return { answer: NOT_FOUND_ANSWER, sources: [] };
     }
 
@@ -56,18 +59,22 @@ export class RagService {
     const answer = await this.generateAnswer(messages);
     this.logger.log('LLM request completed');
 
-    // Sources are deduplicated by page so the UI doesn't show the same page
-    // multiple times when several chunks from it were retrieved.
-    const seenPages = new Set<number>();
+    // Sources are deduplicated by document+page so the UI doesn't show the
+    // same page multiple times when several chunks from it were retrieved —
+    // keyed by documentId as well as page number since two different
+    // documents can legitimately share the same page number.
+    const seenPages = new Set<string>();
     const sources: AnswerSource[] = [];
     for (const chunk of chunks) {
-      if (seenPages.has(chunk.pageNumber)) continue;
-      seenPages.add(chunk.pageNumber);
+      const key = `${chunk.documentId}:${chunk.pageNumber}`;
+      if (seenPages.has(key)) continue;
+      seenPages.add(key);
       sources.push({
-        documentId,
+        documentId: chunk.documentId,
         filename: chunk.filename,
         pageNumber: chunk.pageNumber,
         chunkIndex: chunk.chunkIndex,
+        snippetText: chunk.text,
       });
     }
 

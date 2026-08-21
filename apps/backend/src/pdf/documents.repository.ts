@@ -1,4 +1,4 @@
-import { DocumentMetadata } from './interfaces/document-metadata.interface';
+import { DocumentListFilter, DocumentMetadata } from './interfaces/document-metadata.interface';
 
 /**
  * Abstraction over document metadata storage.
@@ -16,5 +16,5 @@ export abstract class DocumentsRepository {
   abstract findById(id: string): Promise<DocumentMetadata | undefined>;
   abstract update(id: string, patch: Partial<DocumentMetadata>): Promise<void>;
   abstract delete(id: string): Promise<void>;
-  abstract list(): Promise<DocumentMetadata[]>;
+  abstract list(filter?: DocumentListFilter): Promise<DocumentMetadata[]>;
 }

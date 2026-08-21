@@ -13,9 +13,21 @@ export class DocumentNotFoundException extends HttpException {
   }
 }
 
+export class ConversationNotFoundException extends HttpException {
+  constructor(conversationId: string) {
+    super(`Conversation '${conversationId}' was not found`, HttpStatus.NOT_FOUND);
+  }
+}
+
 export class DocumentNotReadyException extends HttpException {
   constructor(status: string) {
     super(`Document is not ready for questions yet (status: ${status})`, HttpStatus.CONFLICT);
+  }
+}
+
+export class InvalidDocumentStateException extends HttpException {
+  constructor(message: string) {
+    super(message, HttpStatus.CONFLICT);
   }
 }
 

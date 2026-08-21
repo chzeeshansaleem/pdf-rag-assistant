@@ -1,57 +1,63 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useUploadDocument } from '../hooks/useUploadDocument';
+import { useCallback, useRef, useState } from 'react';
+import { UploadCloud, AlertCircle } from 'lucide-react';
+import { useUploadDocuments } from '../hooks/useUploadDocuments';
 import { extractErrorMessage } from '../api/client';
-import type { UploadDocumentResponse } from '../types/api';
-
-const PROCESSING_STAGES = ['Extracting text...', 'Cleaning and chunking text...', 'Creating embeddings...', 'Indexing document...'];
+import { CATEGORIES } from '../constants/categories';
 
 interface UploadPanelProps {
-  onUploaded: (doc: UploadDocumentResponse) => void;
+  onUploaded?: () => void;
 }
 
 export function UploadPanel({ onUploaded }: UploadPanelProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [stageIndex, setStageIndex] = useState(0);
+  const [category, setCategory] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { mutate, isPending, isError, error, reset } = useUploadDocument(setUploadProgress);
+  const { mutate, isPending, isError, error, reset } = useUploadDocuments(setUploadProgress);
 
-  // Upload itself finishes fast; the bulk of the wait is server-side
-  // processing (parse -> chunk -> embed -> store). Since the backend
-  // processes synchronously within the request, we simulate the staged
-  // "Processing PDF..." messaging from section 13 client-side while we wait
-  // for the response, to keep the user oriented on what's happening.
-  useEffect(() => {
-    if (!isPending || uploadProgress < 100) return;
-    setStageIndex(0);
-    const interval = setInterval(() => {
-      setStageIndex((i) => Math.min(i + 1, PROCESSING_STAGES.length - 1));
-    }, 900);
-    return () => clearInterval(interval);
-  }, [isPending, uploadProgress]);
-
-  const handleFile = useCallback(
-    (file: File | undefined) => {
-      if (!file) return;
+  const handleFiles = useCallback(
+    (fileList: FileList | null) => {
+      const files = Array.from(fileList ?? []).filter((f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+      if (files.length === 0) return;
       reset();
       setUploadProgress(0);
-      mutate(file, { onSuccess: onUploaded });
+      mutate({ files, category: category || undefined }, { onSuccess: onUploaded });
     },
-    [mutate, onUploaded, reset],
+    [mutate, onUploaded, reset, category],
   );
 
   const onDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       setIsDragging(false);
-      handleFile(e.dataTransfer.files?.[0]);
+      handleFiles(e.dataTransfer.files);
     },
-    [handleFile],
+    [handleFiles],
   );
 
   return (
-    <div className="w-full max-w-xl mx-auto">
+    <div className="w-full rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="text-sm font-medium text-slate-700">Upload documents</p>
+        <label className="flex items-center gap-2 text-xs text-slate-500">
+          Category
+          <select
+            id="upload-category"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="">None</option>
+            {CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -60,59 +66,43 @@ export function UploadPanel({ onUploaded }: UploadPanelProps) {
         onDragLeave={() => setIsDragging(false)}
         onDrop={onDrop}
         onClick={() => inputRef.current?.click()}
-        className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-10 text-center cursor-pointer transition-colors ${
-          isDragging ? 'border-indigo-500 bg-indigo-50' : 'border-slate-300 bg-white hover:border-indigo-400'
+        className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-6 py-8 text-center cursor-pointer transition-all ${
+          isDragging ? 'border-indigo-400 bg-indigo-50/60' : 'border-slate-200 bg-slate-50/50 hover:border-indigo-300 hover:bg-indigo-50/30'
         }`}
       >
-        <div className="text-4xl">📄</div>
-        <p className="text-slate-700 font-medium">Drag & drop a PDF here</p>
-        <p className="text-slate-400 text-sm">or</p>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            inputRef.current?.click();
-          }}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-        >
-          Choose PDF
-        </button>
+        <div className={`flex h-10 w-10 items-center justify-center rounded-full transition-colors ${isDragging ? 'bg-indigo-100' : 'bg-white border border-slate-200'}`}>
+          <UploadCloud className={`h-5 w-5 ${isDragging ? 'text-indigo-600' : 'text-slate-400'}`} strokeWidth={1.75} />
+        </div>
+        <p className="text-sm font-medium text-slate-700">
+          <span className="text-indigo-600">Click to upload</span> or drag and drop
+        </p>
+        <p className="text-xs text-slate-400">PDF only, up to 25MB each · multi-select supported</p>
         <input
           ref={inputRef}
           type="file"
           accept="application/pdf"
+          multiple
           className="hidden"
-          onChange={(e) => handleFile(e.target.files?.[0])}
+          onChange={(e) => handleFiles(e.target.files)}
         />
       </div>
 
       {isPending && (
-        <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
-          {uploadProgress < 100 ? (
-            <>
-              <div className="flex justify-between text-sm text-slate-600 mb-1">
-                <span>Uploading...</span>
-                <span>{uploadProgress}%</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-slate-100">
-                <div
-                  className="h-2 rounded-full bg-indigo-600 transition-all"
-                  style={{ width: `${uploadProgress}%` }}
-                />
-              </div>
-            </>
-          ) : (
-            <div className="flex items-center gap-2 text-sm text-slate-600">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent" />
-              <span>Processing PDF... {PROCESSING_STAGES[stageIndex]}</span>
-            </div>
-          )}
+        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+            <span>Uploading…</span>
+            <span className="tabular-nums">{uploadProgress}%</span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+            <div className="h-1.5 rounded-full bg-indigo-600 transition-all" style={{ width: `${uploadProgress}%` }} />
+          </div>
         </div>
       )}
 
       {isError && (
-        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {extractErrorMessage(error)}
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" strokeWidth={2} />
+          <span>{extractErrorMessage(error)}</span>
         </div>
       )}
     </div>

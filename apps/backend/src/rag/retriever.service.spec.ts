@@ -6,15 +6,15 @@ function makeConfigStub(overrides: Record<string, unknown> = {}) {
 }
 
 describe('RetrieverService', () => {
-  it('embeds the question and searches Qdrant scoped to the given documentId', async () => {
+  it('embeds the question and searches Qdrant scoped to the given documentIds', async () => {
     const embeddingsService = { generateEmbedding: jest.fn().mockResolvedValue([0.1, 0.2]) } as any;
     const qdrantService = { searchSimilarChunks: jest.fn().mockResolvedValue([]) } as any;
 
     const retriever = new RetrieverService(embeddingsService, qdrantService, makeConfigStub());
-    await retriever.retrieve('doc-1', 'What database is used?');
+    await retriever.retrieve({ documentIds: ['doc-1'] }, 'What database is used?');
 
     expect(embeddingsService.generateEmbedding).toHaveBeenCalledWith('What database is used?');
-    expect(qdrantService.searchSimilarChunks).toHaveBeenCalledWith([0.1, 0.2], 'doc-1', 5, 0.35);
+    expect(qdrantService.searchSimilarChunks).toHaveBeenCalledWith([0.1, 0.2], { documentIds: ['doc-1'] }, 5, 0.35);
   });
 
   it('maps Qdrant results into RetrievedChunk objects', async () => {
@@ -26,10 +26,10 @@ describe('RetrieverService', () => {
     } as any;
 
     const retriever = new RetrieverService(embeddingsService, qdrantService, makeConfigStub());
-    const results = await retriever.retrieve('doc-1', 'question');
+    const results = await retriever.retrieve({ documentIds: ['doc-1'] }, 'question');
 
     expect(results).toEqual([
-      { text: 'PostgreSQL is used', filename: 'a.pdf', pageNumber: 3, chunkIndex: 7, score: 0.9 },
+      { documentId: 'doc-1', text: 'PostgreSQL is used', filename: 'a.pdf', pageNumber: 3, chunkIndex: 7, score: 0.9 },
     ]);
   });
 
@@ -42,7 +42,7 @@ describe('RetrieverService', () => {
     } as any;
 
     const retriever = new RetrieverService(embeddingsService, qdrantService, makeConfigStub({ 'rag.similarityThreshold': 0.35 }));
-    const results = await retriever.retrieve('doc-1', 'unrelated question');
+    const results = await retriever.retrieve({ documentIds: ['doc-1'] }, 'unrelated question');
 
     expect(results).toEqual([]);
   });
@@ -56,8 +56,18 @@ describe('RetrieverService', () => {
       qdrantService,
       makeConfigStub({ 'rag.topK': 10, 'rag.similarityThreshold': 0.5 }),
     );
-    await retriever.retrieve('doc-1', 'question');
+    await retriever.retrieve({ documentIds: ['doc-1'] }, 'question');
 
-    expect(qdrantService.searchSimilarChunks).toHaveBeenCalledWith([0.1], 'doc-1', 10, 0.5);
+    expect(qdrantService.searchSimilarChunks).toHaveBeenCalledWith([0.1], { documentIds: ['doc-1'] }, 10, 0.5);
+  });
+
+  it('passes an empty scope through unchanged to search the whole library', async () => {
+    const embeddingsService = { generateEmbedding: jest.fn().mockResolvedValue([0.1]) } as any;
+    const qdrantService = { searchSimilarChunks: jest.fn().mockResolvedValue([]) } as any;
+
+    const retriever = new RetrieverService(embeddingsService, qdrantService, makeConfigStub());
+    await retriever.retrieve({}, 'question');
+
+    expect(qdrantService.searchSimilarChunks).toHaveBeenCalledWith([0.1], {}, 5, 0.35);
   });
 });

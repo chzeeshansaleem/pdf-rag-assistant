@@ -5,8 +5,10 @@ import { PdfController } from './pdf.controller';
 import { PdfService } from './pdf.service';
 import { PdfProcessor } from './pdf.processor';
 import { ChunkingService } from './chunking.service';
+import { FileStorageService } from './file-storage.service';
+import { StuckProcessingSweeperService } from './stuck-processing-sweeper.service';
 import { DocumentsRepository } from './documents.repository';
-import { InMemoryDocumentsRepository } from './in-memory-documents.repository';
+import { PrismaDocumentsRepository } from './prisma-documents.repository';
 import { EmbeddingsModule } from '../embeddings/embeddings.module';
 import { VectorStoreModule } from '../vector-store/vector-store.module';
 
@@ -29,7 +31,9 @@ import { VectorStoreModule } from '../vector-store/vector-store.module';
     PdfService,
     PdfProcessor,
     ChunkingService,
-    { provide: DocumentsRepository, useClass: InMemoryDocumentsRepository },
+    FileStorageService,
+    StuckProcessingSweeperService,
+    { provide: DocumentsRepository, useClass: PrismaDocumentsRepository },
   ],
   exports: [DocumentsRepository, ChunkingService],
 })

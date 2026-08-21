@@ -7,6 +7,7 @@ export class DocumentResponseDto {
   pageCount: number;
   chunkCount: number;
   status: DocumentStatus;
+  category?: string;
   errorMessage?: string;
   createdAt: string;
   updatedAt: string;

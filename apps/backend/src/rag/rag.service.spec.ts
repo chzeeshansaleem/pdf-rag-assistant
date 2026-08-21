@@ -9,7 +9,7 @@ function makeConfigStub(overrides: Record<string, unknown> = {}) {
 }
 
 const sampleChunks: RetrievedChunk[] = [
-  { text: 'PostgreSQL is used as the primary database.', filename: 'a.pdf', pageNumber: 5, chunkIndex: 12, score: 0.8 },
+  { documentId: 'doc-1', text: 'PostgreSQL is used as the primary database.', filename: 'a.pdf', pageNumber: 5, chunkIndex: 12, score: 0.8 },
 ];
 
 describe('RagService', () => {
@@ -20,7 +20,7 @@ describe('RagService', () => {
     const fakeClient = { chat: { completions: { create } } } as any;
 
     const rag = new RagService(retrieverService, promptService, makeConfigStub(), fakeClient);
-    const result = await rag.answerQuestion('doc-1', 'unrelated question');
+    const result = await rag.answerQuestion({ documentIds: ['doc-1'] }, 'unrelated question');
 
     expect(result.answer).toBe(NOT_FOUND_ANSWER);
     expect(result.sources).toEqual([]);
@@ -36,19 +36,27 @@ describe('RagService', () => {
     const fakeClient = { chat: { completions: { create } } } as any;
 
     const rag = new RagService(retrieverService, promptService, makeConfigStub(), fakeClient);
-    const result = await rag.answerQuestion('doc-1', 'What database is used?');
+    const result = await rag.answerQuestion({ documentIds: ['doc-1'] }, 'What database is used?');
 
     expect(result.answer).toBe('The architecture uses PostgreSQL (Page 5).');
-    expect(result.sources).toEqual([{ documentId: 'doc-1', filename: 'a.pdf', pageNumber: 5, chunkIndex: 12 }]);
+    expect(result.sources).toEqual([
+      {
+        documentId: 'doc-1',
+        filename: 'a.pdf',
+        pageNumber: 5,
+        chunkIndex: 12,
+        snippetText: 'PostgreSQL is used as the primary database.',
+      },
+    ]);
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'gpt-4o-mini', temperature: 0 }),
     );
   });
 
-  it('deduplicates sources that come from the same page', async () => {
+  it('deduplicates sources that come from the same document and page', async () => {
     const chunksFromSamePage: RetrievedChunk[] = [
-      { text: 'chunk A', filename: 'a.pdf', pageNumber: 5, chunkIndex: 1, score: 0.9 },
-      { text: 'chunk B', filename: 'a.pdf', pageNumber: 5, chunkIndex: 2, score: 0.85 },
+      { documentId: 'doc-1', text: 'chunk A', filename: 'a.pdf', pageNumber: 5, chunkIndex: 1, score: 0.9 },
+      { documentId: 'doc-1', text: 'chunk B', filename: 'a.pdf', pageNumber: 5, chunkIndex: 2, score: 0.85 },
     ];
     const retrieverService = { retrieve: jest.fn().mockResolvedValue(chunksFromSamePage) } as any;
     const promptService = new PromptService();
@@ -56,9 +64,26 @@ describe('RagService', () => {
     const fakeClient = { chat: { completions: { create } } } as any;
 
     const rag = new RagService(retrieverService, promptService, makeConfigStub(), fakeClient);
-    const result = await rag.answerQuestion('doc-1', 'question');
+    const result = await rag.answerQuestion({ documentIds: ['doc-1'] }, 'question');
 
     expect(result.sources).toHaveLength(1);
+  });
+
+  it('does not deduplicate the same page number across two different documents', async () => {
+    const sharedPageDifferentDocs: RetrievedChunk[] = [
+      { documentId: 'doc-1', text: 'chunk A', filename: 'a.pdf', pageNumber: 3, chunkIndex: 1, score: 0.9 },
+      { documentId: 'doc-2', text: 'chunk B', filename: 'b.pdf', pageNumber: 3, chunkIndex: 4, score: 0.85 },
+    ];
+    const retrieverService = { retrieve: jest.fn().mockResolvedValue(sharedPageDifferentDocs) } as any;
+    const promptService = new PromptService();
+    const create = jest.fn().mockResolvedValue({ choices: [{ message: { content: 'answer' } }] });
+    const fakeClient = { chat: { completions: { create } } } as any;
+
+    const rag = new RagService(retrieverService, promptService, makeConfigStub(), fakeClient);
+    const result = await rag.answerQuestion({}, 'question');
+
+    expect(result.sources).toHaveLength(2);
+    expect(result.sources.map((s) => s.documentId).sort()).toEqual(['doc-1', 'doc-2']);
   });
 
   it('throws LlmServiceException when the OpenAI call ultimately fails', async () => {
@@ -69,7 +94,7 @@ describe('RagService', () => {
     const fakeClient = { chat: { completions: { create } } } as any;
 
     const rag = new RagService(retrieverService, promptService, makeConfigStub(), fakeClient);
-    const promise = expect(rag.answerQuestion('doc-1', 'question')).rejects.toBeInstanceOf(LlmServiceException);
+    const promise = expect(rag.answerQuestion({ documentIds: ['doc-1'] }, 'question')).rejects.toBeInstanceOf(LlmServiceException);
     await jest.runAllTimersAsync();
     await promise;
     jest.useRealTimers();
@@ -82,6 +107,6 @@ describe('RagService', () => {
     const fakeClient = { chat: { completions: { create } } } as any;
 
     const rag = new RagService(retrieverService, promptService, makeConfigStub(), fakeClient);
-    await expect(rag.answerQuestion('doc-1', 'question')).rejects.toBeInstanceOf(LlmServiceException);
+    await expect(rag.answerQuestion({ documentIds: ['doc-1'] }, 'question')).rejects.toBeInstanceOf(LlmServiceException);
   });
 });

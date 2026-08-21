@@ -1,9 +1,20 @@
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { askQuestion } from '../api/client';
-import type { ChatResponse } from '../types/api';
+import type { AskQuestionScope, ChatResponse } from '../types/api';
+
+interface AskArgs {
+  conversationId: string;
+  question: string;
+  scope?: AskQuestionScope;
+}
 
 export function useChat() {
-  return useMutation<ChatResponse, unknown, { documentId: string; question: string }>({
-    mutationFn: ({ documentId, question }) => askQuestion(documentId, question),
+  const queryClient = useQueryClient();
+  return useMutation<ChatResponse, unknown, AskArgs>({
+    mutationFn: ({ conversationId, question, scope }) => askQuestion(conversationId, question, scope),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['conversation', variables.conversationId] });
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+    },
   });
 }

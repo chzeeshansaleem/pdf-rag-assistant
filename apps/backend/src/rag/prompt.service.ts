@@ -13,7 +13,7 @@ Rules:
 2. Do not invent facts.
 3. If the answer cannot be found in the context, clearly say: "${NOT_FOUND_ANSWER}"
 4. Prefer concise and direct answers.
-5. When possible, mention the page number where the information was found.`;
+5. When possible, mention the document filename and page number where the information was found — especially important when the context includes chunks from more than one document.`;
 
 /**
  * PromptService — turns retrieved chunks + a question into the exact
@@ -26,10 +26,12 @@ Rules:
  * to — the system prompt's rules exist specifically to pin the model to
  * only the text it was given.
  *
- * Why context is built this way: each chunk is labeled with its page number
- * before being concatenated, so the model can (and is instructed to) cite
- * where an answer came from, and so a human skimming the raw context could
- * verify it against the source PDF.
+ * Why context is built this way: each chunk is labeled with its source
+ * filename and page number before being concatenated, so the model can (and
+ * is instructed to) cite where an answer came from — critical once a
+ * question can retrieve chunks from more than one document, since a bare
+ * page number is ambiguous across documents — and so a human skimming the
+ * raw context could verify it against the source PDF.
  *
  * What enters: retrieved chunks and the user's question.
  * What leaves: a system/user message pair ready to send to the OpenAI chat
@@ -38,7 +40,7 @@ Rules:
 @Injectable()
 export class PromptService {
   buildContext(chunks: RetrievedChunk[]): string {
-    return chunks.map((c) => `[Page ${c.pageNumber}]\n${c.text}`).join('\n\n---\n\n');
+    return chunks.map((c) => `[${c.filename}, Page ${c.pageNumber}]\n${c.text}`).join('\n\n---\n\n');
   }
 
   buildMessages(chunks: RetrievedChunk[], question: string): OpenAI.Chat.ChatCompletionMessageParam[] {

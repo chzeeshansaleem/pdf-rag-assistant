@@ -30,6 +30,7 @@ export interface AppConfig {
   };
   upload: {
     maxFileSize: number;
+    storageDir: string;
   };
   databaseUrl?: string;
 }
@@ -66,11 +67,12 @@ export default (): AppConfig => ({
     chunkOverlap: toInt(process.env.CHUNK_OVERLAP, 120),
   },
   rag: {
-    topK: toInt(process.env.RAG_TOP_K, 5),
+    topK: toInt(process.env.RAG_TOP_K, 8),
     similarityThreshold: toFloat(process.env.RAG_SIMILARITY_THRESHOLD, 0.35),
   },
   upload: {
     maxFileSize: toInt(process.env.MAX_FILE_SIZE, 20 * 1024 * 1024),
+    storageDir: process.env.UPLOAD_STORAGE_DIR ?? './data/uploads',
   },
   databaseUrl: process.env.DATABASE_URL,
 });

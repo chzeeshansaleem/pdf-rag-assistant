@@ -1,5 +1,14 @@
 import axios, { AxiosError } from 'axios';
-import type { ApiErrorBody, ChatResponse, DocumentResponse, UploadDocumentResponse } from '../types/api';
+import type {
+  ApiErrorBody,
+  AskQuestionScope,
+  ChatResponse,
+  ConversationDetail,
+  ConversationSummary,
+  DocumentResponse,
+  ListDocumentsFilter,
+  UploadDocumentResponse,
+} from '../types/api';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001/api';
 
@@ -19,15 +28,31 @@ export function extractErrorMessage(error: unknown): string {
   return 'Something went wrong. Please try again.';
 }
 
-export async function uploadDocument(file: File, onProgress?: (percent: number) => void): Promise<UploadDocumentResponse> {
+export async function uploadDocuments(
+  files: File[],
+  category?: string,
+  onProgress?: (percent: number) => void,
+): Promise<UploadDocumentResponse[]> {
   const formData = new FormData();
-  formData.append('file', file);
+  for (const file of files) formData.append('files', file);
+  if (category) formData.append('category', category);
 
-  const { data } = await apiClient.post<UploadDocumentResponse>('/documents/upload', formData, {
+  const { data } = await apiClient.post<UploadDocumentResponse[]>('/documents/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: (event) => {
       if (!onProgress || !event.total) return;
       onProgress(Math.round((event.loaded / event.total) * 100));
+    },
+  });
+  return data;
+}
+
+export async function listDocuments(filter?: ListDocumentsFilter): Promise<DocumentResponse[]> {
+  const { data } = await apiClient.get<DocumentResponse[]>('/documents', {
+    params: {
+      status: filter?.status,
+      category: filter?.category,
+      ids: filter?.ids?.join(','),
     },
   });
   return data;
@@ -42,7 +67,41 @@ export async function deleteDocument(documentId: string): Promise<void> {
   await apiClient.delete(`/documents/${documentId}`);
 }
 
-export async function askQuestion(documentId: string, question: string): Promise<ChatResponse> {
-  const { data } = await apiClient.post<ChatResponse>('/chat', { documentId, question });
+export async function retryDocument(documentId: string): Promise<DocumentResponse> {
+  const { data } = await apiClient.post<DocumentResponse>(`/documents/${documentId}/retry`);
+  return data;
+}
+
+export async function reprocessDocument(documentId: string): Promise<DocumentResponse> {
+  const { data } = await apiClient.post<DocumentResponse>(`/documents/${documentId}/reprocess`);
+  return data;
+}
+
+export async function createConversation(): Promise<ConversationSummary> {
+  const { data } = await apiClient.post<ConversationSummary>('/conversations');
+  return data;
+}
+
+export async function listConversations(): Promise<ConversationSummary[]> {
+  const { data } = await apiClient.get<ConversationSummary[]>('/conversations');
+  return data;
+}
+
+export async function getConversation(conversationId: string): Promise<ConversationDetail> {
+  const { data } = await apiClient.get<ConversationDetail>(`/conversations/${conversationId}`);
+  return data;
+}
+
+export async function deleteConversation(conversationId: string): Promise<void> {
+  await apiClient.delete(`/conversations/${conversationId}`);
+}
+
+export async function askQuestion(conversationId: string, question: string, scope?: AskQuestionScope): Promise<ChatResponse> {
+  const { data } = await apiClient.post<ChatResponse>('/chat', {
+    conversationId,
+    question,
+    documentIds: scope?.documentIds,
+    category: scope?.category,
+  });
   return data;
 }

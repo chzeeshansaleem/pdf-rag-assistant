@@ -10,6 +10,7 @@ export interface ChunkPayload {
   pageNumber: number;
   chunkIndex: number;
   text: string;
+  category?: string;
   createdAt: string;
 }
 
