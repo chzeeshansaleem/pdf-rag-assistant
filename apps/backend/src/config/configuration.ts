@@ -27,6 +27,7 @@ export interface AppConfig {
   rag: {
     topK: number;
     similarityThreshold: number;
+    maxRecentMessages: number;
   };
   upload: {
     maxFileSize: number;
@@ -69,6 +70,10 @@ export default (): AppConfig => ({
   rag: {
     topK: toInt(process.env.RAG_TOP_K, 8),
     similarityThreshold: toFloat(process.env.RAG_SIMILARITY_THRESHOLD, 0.35),
+    // Verbatim messages sent to the LLM per turn (both for query rewriting
+    // and the final answer). Older messages are folded into a rolling
+    // conversation summary instead of being sent raw forever.
+    maxRecentMessages: toInt(process.env.RAG_MAX_RECENT_MESSAGES, 10),
   },
   upload: {
     maxFileSize: toInt(process.env.MAX_FILE_SIZE, 20 * 1024 * 1024),

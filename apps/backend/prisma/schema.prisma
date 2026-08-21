@@ -33,6 +33,15 @@ model Document {
 model Conversation {
   id        String    @id @default(uuid())
   title     String?
+  // Rolling summary of messages older than the "recent window" sent to the
+  // LLM — see ConversationsService.maybeSummarize. Keeps long conversations
+  // from growing the prompt unboundedly while still preserving earlier
+  // context (documents discussed, entities, unresolved references).
+  summary   String?
+  // Id of the newest message already folded into `summary`, so
+  // maybeSummarize() only has to summarize messages that aged out of the
+  // recent window since the last run, not the whole prefix again each time.
+  summarizedThroughMessageId String?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   messages  Message[]

@@ -19,7 +19,9 @@ describe('RagService', () => {
     const create = jest.fn();
     const fakeClient = { chat: { completions: { create } } } as any;
 
-    const rag = new RagService(retrieverService, promptService, makeConfigStub(), fakeClient);
+    const queryRewriterService = { rewrite: jest.fn() } as any;
+    const chitchatService = { detect: jest.fn().mockReturnValue(null) } as any;
+    const rag = new RagService(retrieverService, promptService, queryRewriterService, chitchatService, makeConfigStub(), fakeClient);
     const result = await rag.answerQuestion({ documentIds: ['doc-1'] }, 'unrelated question');
 
     expect(result.answer).toBe(NOT_FOUND_ANSWER);
@@ -35,7 +37,9 @@ describe('RagService', () => {
     });
     const fakeClient = { chat: { completions: { create } } } as any;
 
-    const rag = new RagService(retrieverService, promptService, makeConfigStub(), fakeClient);
+    const queryRewriterService = { rewrite: jest.fn() } as any;
+    const chitchatService = { detect: jest.fn().mockReturnValue(null) } as any;
+    const rag = new RagService(retrieverService, promptService, queryRewriterService, chitchatService, makeConfigStub(), fakeClient);
     const result = await rag.answerQuestion({ documentIds: ['doc-1'] }, 'What database is used?');
 
     expect(result.answer).toBe('The architecture uses PostgreSQL (Page 5).');
@@ -63,7 +67,9 @@ describe('RagService', () => {
     const create = jest.fn().mockResolvedValue({ choices: [{ message: { content: 'answer' } }] });
     const fakeClient = { chat: { completions: { create } } } as any;
 
-    const rag = new RagService(retrieverService, promptService, makeConfigStub(), fakeClient);
+    const queryRewriterService = { rewrite: jest.fn() } as any;
+    const chitchatService = { detect: jest.fn().mockReturnValue(null) } as any;
+    const rag = new RagService(retrieverService, promptService, queryRewriterService, chitchatService, makeConfigStub(), fakeClient);
     const result = await rag.answerQuestion({ documentIds: ['doc-1'] }, 'question');
 
     expect(result.sources).toHaveLength(1);
@@ -79,7 +85,9 @@ describe('RagService', () => {
     const create = jest.fn().mockResolvedValue({ choices: [{ message: { content: 'answer' } }] });
     const fakeClient = { chat: { completions: { create } } } as any;
 
-    const rag = new RagService(retrieverService, promptService, makeConfigStub(), fakeClient);
+    const queryRewriterService = { rewrite: jest.fn() } as any;
+    const chitchatService = { detect: jest.fn().mockReturnValue(null) } as any;
+    const rag = new RagService(retrieverService, promptService, queryRewriterService, chitchatService, makeConfigStub(), fakeClient);
     const result = await rag.answerQuestion({}, 'question');
 
     expect(result.sources).toHaveLength(2);
@@ -93,7 +101,9 @@ describe('RagService', () => {
     const create = jest.fn().mockRejectedValue(new Error('service unavailable'));
     const fakeClient = { chat: { completions: { create } } } as any;
 
-    const rag = new RagService(retrieverService, promptService, makeConfigStub(), fakeClient);
+    const queryRewriterService = { rewrite: jest.fn() } as any;
+    const chitchatService = { detect: jest.fn().mockReturnValue(null) } as any;
+    const rag = new RagService(retrieverService, promptService, queryRewriterService, chitchatService, makeConfigStub(), fakeClient);
     const promise = expect(rag.answerQuestion({ documentIds: ['doc-1'] }, 'question')).rejects.toBeInstanceOf(LlmServiceException);
     await jest.runAllTimersAsync();
     await promise;
@@ -106,7 +116,59 @@ describe('RagService', () => {
     const create = jest.fn().mockResolvedValue({ choices: [{ message: { content: null } }] });
     const fakeClient = { chat: { completions: { create } } } as any;
 
-    const rag = new RagService(retrieverService, promptService, makeConfigStub(), fakeClient);
+    const queryRewriterService = { rewrite: jest.fn() } as any;
+    const chitchatService = { detect: jest.fn().mockReturnValue(null) } as any;
+    const rag = new RagService(retrieverService, promptService, queryRewriterService, chitchatService, makeConfigStub(), fakeClient);
     await expect(rag.answerQuestion({ documentIds: ['doc-1'] }, 'question')).rejects.toBeInstanceOf(LlmServiceException);
+  });
+
+  it('when memory is given, retrieves using the rewritten query but prompts the LLM with the raw question', async () => {
+    const retrieverService = { retrieve: jest.fn().mockResolvedValue(sampleChunks) } as any;
+    const promptService = { buildMessages: jest.fn().mockReturnValue([{ role: 'system', content: 's' }]) } as any;
+    const create = jest.fn().mockResolvedValue({ choices: [{ message: { content: 'answer' } }] });
+    const fakeClient = { chat: { completions: { create } } } as any;
+    const queryRewriterService = { rewrite: jest.fn().mockResolvedValue('resolved standalone query') } as any;
+    const chitchatService = { detect: jest.fn().mockReturnValue(null) } as any;
+    const memory = { summary: null, recentMessages: [{ role: 'user' as const, content: 'earlier question' }] };
+
+    const rag = new RagService(retrieverService, promptService, queryRewriterService, chitchatService, makeConfigStub(), fakeClient);
+    await rag.answerQuestion({ documentIds: ['doc-1'] }, 'explain the second one', memory);
+
+    expect(queryRewriterService.rewrite).toHaveBeenCalledWith('explain the second one', memory);
+    expect(retrieverService.retrieve).toHaveBeenCalledWith({ documentIds: ['doc-1'] }, 'resolved standalone query');
+    expect(promptService.buildMessages).toHaveBeenCalledWith(sampleChunks, 'explain the second one', memory);
+  });
+
+  it('when no memory is given, skips the rewriter entirely and retrieves using the raw question', async () => {
+    const retrieverService = { retrieve: jest.fn().mockResolvedValue(sampleChunks) } as any;
+    const promptService = new PromptService();
+    const create = jest.fn().mockResolvedValue({ choices: [{ message: { content: 'answer' } }] });
+    const fakeClient = { chat: { completions: { create } } } as any;
+    const queryRewriterService = { rewrite: jest.fn() } as any;
+    const chitchatService = { detect: jest.fn().mockReturnValue(null) } as any;
+
+    const rag = new RagService(retrieverService, promptService, queryRewriterService, chitchatService, makeConfigStub(), fakeClient);
+    await rag.answerQuestion({ documentIds: ['doc-1'] }, 'a standalone question');
+
+    expect(queryRewriterService.rewrite).not.toHaveBeenCalled();
+    expect(retrieverService.retrieve).toHaveBeenCalledWith({ documentIds: ['doc-1'] }, 'a standalone question');
+  });
+
+  it('when the message is chitchat, returns the canned reply and never touches retrieval, the rewriter, or the LLM', async () => {
+    const retrieverService = { retrieve: jest.fn() } as any;
+    const promptService = { buildMessages: jest.fn() } as any;
+    const create = jest.fn();
+    const fakeClient = { chat: { completions: { create } } } as any;
+    const queryRewriterService = { rewrite: jest.fn() } as any;
+    const chitchatService = { detect: jest.fn().mockReturnValue("Hello! I'm DocuMind AI.") } as any;
+
+    const rag = new RagService(retrieverService, promptService, queryRewriterService, chitchatService, makeConfigStub(), fakeClient);
+    const result = await rag.answerQuestion({}, 'hello');
+
+    expect(result).toEqual({ answer: "Hello! I'm DocuMind AI.", sources: [] });
+    expect(retrieverService.retrieve).not.toHaveBeenCalled();
+    expect(queryRewriterService.rewrite).not.toHaveBeenCalled();
+    expect(promptService.buildMessages).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
   });
 });
